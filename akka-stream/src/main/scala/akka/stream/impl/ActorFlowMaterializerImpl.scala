@@ -22,12 +22,14 @@ import scala.concurrent.{ Await, ExecutionContextExecutor }
 /**
  * INTERNAL API
  */
-private[akka] case class ActorFlowMaterializerImpl(override val settings: ActorFlowMaterializerSettings,
-                                                   dispatchers: Dispatchers,
-                                                   supervisor: ActorRef,
-                                                   flowNameCounter: AtomicLong,
-                                                   namePrefix: String,
-                                                   optimizations: Optimizations)
+private[akka] case class ActorFlowMaterializerImpl(
+  val system: ActorSystem,
+  override val settings: ActorFlowMaterializerSettings,
+  dispatchers: Dispatchers,
+  val supervisor: ActorRef,
+  flowNameCounter: AtomicLong,
+  namePrefix: String,
+  optimizations: Optimizations)
   extends ActorFlowMaterializer {
   import ActorFlowMaterializerImpl._
   import akka.stream.impl.Stages._
@@ -223,6 +225,13 @@ private[akka] object StreamSupervisor {
   def props(settings: ActorFlowMaterializerSettings): Props = Props(new StreamSupervisor(settings))
 
   final case class Materialize(props: Props, name: String) extends DeadLetterSuppression
+
+  /** Testing purpose */
+  final case object GetChildren
+  /** Testing purpose */
+  final case class Children(children: Set[ActorRef])
+  /** Testing purpose */
+  final case object StopChildren
 }
 
 private[akka] class StreamSupervisor(settings: ActorFlowMaterializerSettings) extends Actor {
@@ -234,6 +243,8 @@ private[akka] class StreamSupervisor(settings: ActorFlowMaterializerSettings) ex
     case Materialize(props, name) ⇒
       val impl = context.actorOf(props, name)
       sender() ! impl
+    case GetChildren  ⇒ sender() ! Children(context.children.toSet)
+    case StopChildren ⇒ context.children.foreach(context.stop)
   }
 }
 
