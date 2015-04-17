@@ -273,7 +273,7 @@ private[akka] object FairMerge {
 private[akka] final class FairMerge(_settings: ActorFlowMaterializerSettings, _inputPorts: Int) extends FanIn(_settings, _inputPorts) {
   inputBunch.markAllInputs()
 
-  nextPhase(TransferPhase(inputBunch.AnyOfMarkedInputs && primaryOutputs.NeedsDemand) { () ⇒
+  initialPhase(inputCount, TransferPhase(inputBunch.AnyOfMarkedInputs && primaryOutputs.NeedsDemand) { () ⇒
     val elem = inputBunch.dequeueAndYield()
     primaryOutputs.enqueueOutputElement(elem)
   })
@@ -298,7 +298,7 @@ private[akka] final class UnfairMerge(_settings: ActorFlowMaterializerSettings,
                                       val preferred: Int) extends FanIn(_settings, _inputPorts) {
   inputBunch.markAllInputs()
 
-  nextPhase(TransferPhase(inputBunch.AnyOfMarkedInputs && primaryOutputs.NeedsDemand) { () ⇒
+  initialPhase(inputCount, TransferPhase(inputBunch.AnyOfMarkedInputs && primaryOutputs.NeedsDemand) { () ⇒
     val elem = inputBunch.dequeuePrefering(preferred)
     primaryOutputs.enqueueOutputElement(elem)
   })
@@ -340,5 +340,5 @@ private[akka] final class Concat(_settings: ActorFlowMaterializerSettings) exten
     primaryOutputs.enqueueOutputElement(elem)
   }
 
-  nextPhase(drainFirst)
+  initialPhase(inputCount, drainFirst)
 }
