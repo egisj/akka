@@ -3,6 +3,7 @@
  */
 package akka.stream.javadsl
 
+import scala.collection.immutable
 import java.util.concurrent.Callable
 import akka.actor.{ Cancellable, ActorRef, Props }
 import akka.japi.Util
@@ -96,8 +97,16 @@ object Source {
    * stream will see an individual flow of elements (always starting from the
    * beginning) regardless of when they subscribed.
    */
-  def from[O](iterable: java.lang.Iterable[O]): javadsl.Source[O, Unit] =
-    new Source(scaladsl.Source(akka.stream.javadsl.japi.Util.immutableIterable(iterable)))
+  def from[O](iterable: java.lang.Iterable[O]): javadsl.Source[O, Unit] = {
+    // this adapter is not immutable if the the underlying java.lang.Iterable is modified
+    // but there is not anything we can do to prevent that from happening.
+    // ConcurrentModificationException will be thrown in some cases.
+    val scalaIterable = new immutable.Iterable[O] {
+      import collection.JavaConverters._
+      override def iterator: Iterator[O] = iterable.iterator().asScala
+    }
+    new Source(scaladsl.Source(scalaIterable))
+  }
 
   /**
    * Start a new `Source` from the given `Future`. The stream will consist of
@@ -363,7 +372,7 @@ class Source[+Out, +Mat](delegate: scaladsl.Source[Out, Mat]) extends Graph[Sour
    * @param n must be positive, and `d` must be greater than 0 seconds, otherwise [[IllegalArgumentException]] is thrown.
    */
   def groupedWithin(n: Int, d: FiniteDuration): javadsl.Source[java.util.List[Out @uncheckedVariance], Mat] =
-    new Source(delegate.groupedWithin(n, d).map(_.asJava)) // FIXME optimize to one step
+    new Source(delegate.groupedWithin(n, d).map(_.asJava)) // TODO optimize to one step
 
   /**
    * Discard the given number of elements at the beginning of the stream.
@@ -473,7 +482,7 @@ class Source[+Out, +Mat](delegate: scaladsl.Source[Out, Mat]) extends Graph[Sour
    * to consume only one of them.
    */
   def groupBy[K](f: japi.Function[Out, K]): javadsl.Source[akka.japi.Pair[K, javadsl.Source[Out @uncheckedVariance, Unit]], Mat] =
-    new Source(delegate.groupBy(f.apply).map { case (k, p) ⇒ akka.japi.Pair(k, p.asJava) }) // FIXME optimize to one step
+    new Source(delegate.groupBy(f.apply).map { case (k, p) ⇒ akka.japi.Pair(k, p.asJava) }) // TODO optimize to one step
 
   /**
    * This operation applies the given predicate to all incoming elements and
