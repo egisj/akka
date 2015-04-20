@@ -39,5 +39,10 @@ class FlowScanSpec extends AkkaSpec {
       val v = Vector.empty[Int]
       scan(Source(v)) should be(v.scan(0)(_ + _))
     }
+
+    "emit values promptly" in {
+      val f = Source.single(1).concat(Source.lazyEmpty).scan(0)(_ + _).grouped(2).runWith(Sink.head)
+      Await.result(f, 1.second) should be(Seq(0, 1))
+    }
   }
 }
