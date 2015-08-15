@@ -30,6 +30,46 @@ in practice. No changes were needed to the Akka source code for this update. Use
 depend on 3.8.0.Final that break with 3.10.3.Final should be able to manually downgrade the dependency
 to 3.8.0.Final and Akka will still work with that version.
 
+Advanced Notice: TypedActors will go away
+=========================================
+
+While technically not yet deprecated, the current ``akka.actor.TypedActor`` support will be superseded by
+the :ref:`typed-scala` project that is currently being developed in open preview mode. If you are using TypedActors
+in your projects you are advised to look into this, as it is superior to the Active Object pattern expressed
+in TypedActors. The generic ActorRefs in Akka Typed allow the same type-safety that is afforded by
+TypedActors while retaining all the other benefits of an explicit actor model (including the ability to
+change behaviors etc.).
+
+It is likely that TypedActors will be officially deprecated in the next major update of Akka and subsequently removed.
+
+Removed Deprecated Features
+===========================
+
+The following, previously deprecated, features have been removed:
+
+* akka-dataflow
+
+* akka-transactor
+
+* durable mailboxes (akka-mailboxes-common, akka-file-mailbox)
+
+* Cluster.publishCurrentClusterState
+
+* akka.cluster.auto-down, replaced by akka.cluster.auto-down-unreachable-after in Akka 2.3
+
+* Old routers and configuration.
+
+  Note that in router configuration you must now specify if it is a ``pool`` or a ``group``
+  in the way that was introduced in Akka 2.3.
+
+* Timeout constructor without unit
+
+* JavaLoggingEventHandler, replaced by JavaLogger
+
+* UntypedActorFactory
+
+* Java API TestKit.dilated, moved to JavaTestKit.dilated
+
 Added parameter validation to RootActorPath
 ===========================================
 Previously ``akka.actor.RootActorPath`` allowed passing in arbitrary strings into its name parameter,
@@ -39,18 +79,6 @@ such as using ``actorSelection`` on such invalid path.
 
 In Akka 2.4.x the ``RootActorPath`` validates the input and may throw an ``IllegalArgumentException`` if
 the passed in name string is illegal (contains ``/`` elsewhere than in the begining of the string or contains ``#``).
-
-Advanced Notice: TypedActors will go away
-=========================================
-
-While technically not yet deprecated, the current ``akka.actor.TypedActor`` support will be superseded by
-the Akka Typed project that is currently being developed in open preview mode. If you are using TypedActors
-in your projects you are advised to look into this, as it is superior to the Active Object pattern expressed
-in TypedActors. The generic ActorRefs in Akka Typed allow the same type-safety that is afforded by
-TypedActors while retaining all the other benefits of an explicit actor model (including the ability to
-change behaviors etc.).
-
-It is likely that TypedActors will be officially deprecated in the next major update of Akka and subsequently removed.
 
 TestKit.remaining throws AssertionError
 =======================================
@@ -93,14 +121,6 @@ Which turns out to be useful in many systems where same-state transitions actual
 
 In case you do *not* want to trigger a state transition event when effectively performing an ``X->X`` transition, use ``stay()`` instead.
 
-Cluster Sharding Entry Path Change
-==================================
-Previously in ``2.3.x`` entries were direct children of the local ``ShardRegion``. In examples the ``persistenceId`` of entries
-included ``self.path.parent.name`` to include the cluster type name.
-
-In ``2.4.x`` entries are now children of a ``Shard``, which in turn is a child of the local ``ShardRegion``. To include the shard
-type in the ``persistenceId`` it is now accessed by ``self.path.parent.parent.name`` from each entry.
-
 
 Circuit Breaker Timeout Change
 ==============================
@@ -108,34 +128,6 @@ In ``2.3.x`` calls protected by the ``CircuitBreaker`` were allowed to run indef
 
 In ``2.4.x`` the failureCount of the Breaker will be increased as soon as the timeout is reached and a ``Failure[TimeoutException]`` will be returned immediately for asynchronous calls. Synchronous calls will now throw a ``TimeoutException`` after the call is finished.
 
-
-Removed Deprecated Features
-===========================
-
-The following, previously deprecated, features have been removed:
-
-* akka-dataflow
-
-* akka-transactor
-
-* durable mailboxes (akka-mailboxes-common, akka-file-mailbox)
-
-* Cluster.publishCurrentClusterState
-
-* akka.cluster.auto-down, replaced by akka.cluster.auto-down-unreachable-after in Akka 2.3
-
-* Old routers and configuration.
-
-  Note that in router configuration you must now specify if it is a ``pool`` or a ``group``
-  in the way that was introduced in Akka 2.3.
-
-* Timeout constructor without unit
-
-* JavaLoggingEventHandler, replaced by JavaLogger
-
-* UntypedActorFactory
-
-* Java API TestKit.dilated, moved to JavaTestKit.dilated
 
 Slf4j logging filter
 ====================
@@ -175,6 +167,14 @@ Secure Cookies
 
 `Secure cookies` feature was deprecated.
 
+Microkernel is Deprecated
+=========================
+
+Akka Microkernel is deprecated and will be removed. It is replaced by using an ordinary
+user defined main class and packaging with `sbt-native-packager <https://github.com/sbt/sbt-native-packager>`_
+or `Typesafe ConductR <http://typesafe.com/products/conductr>`_.
+Please see :ref:`deployment-scenarios` for more information.
+
 New Cluster Metrics Extension 
 =============================
 Previously, cluster metrics functionality was located in the ``akka-cluster`` jar.
@@ -189,14 +189,6 @@ Router configuration entries have also changed for the module, they use prefix `
 ``cluster-metrics-adaptive-pool`` and ``cluster-metrics-adaptive-group``
 Metrics extension classes and objects are located in the new package ``akka.cluster.metrics``. 
 Please see :ref:`Scala <cluster_metrics_scala>`, :ref:`Java <cluster_metrics_java>` for more information.
-
-Microkernel is Deprecated
-=========================
-
-Akka Microkernel is deprecated and will be removed. It is replaced by using an ordinary
-user defined main class and packaging with `sbt-native-packager <https://github.com/sbt/sbt-native-packager>`_
-or `Typesafe ConductR <http://typesafe.com/products/conductr>`_.
-Please see :ref:`deployment-scenarios` for more information.
 
 Cluster tools moved to separate module
 ======================================
@@ -236,6 +228,24 @@ and the ``EntityId`` type in the Scala API.
 
 ``idExtractor`` function was renamed to ``extractEntityId``. ``shardResolver`` function 
 was renamed to ``extractShardId``.
+
+Cluster Sharding Entry Path Change
+==================================
+Previously in ``2.3.x`` entries were direct children of the local ``ShardRegion``. In examples the ``persistenceId`` of entries
+included ``self.path.parent.name`` to include the cluster type name.
+
+In ``2.4.x`` entries are now children of a ``Shard``, which in turn is a child of the local ``ShardRegion``. To include the shard
+type in the ``persistenceId`` it is now accessed by ``self.path.parent.parent.name`` from each entry.
+
+Asynchronous ShardAllocationStrategy
+====================================
+
+The methods of the ``ShardAllocationStrategy`` and ``AbstractShardAllocationStrategy`` in Cluster Sharding
+have changed return type to a ``Future`` to support asynchronous decision. For example you can ask an
+actor external actor of how to allocate shards or rebalance shards.
+
+For the synchronous case you can return the result via ``scala.concurrent.Future.successful`` in Scala or 
+``akka.dispatch.Futures.successful`` in Java.
 
 ClusterSingletonManager and ClusterSingletonProxy construction
 ==============================================================
@@ -287,20 +297,30 @@ is now started as a ``system`` actor instead of a ``user`` actor, i.e. the defau
 the ``ClusterClient`` initial contacts has changed to
 ``"akka.tcp://system@hostname:port/system/receptionist"``.  
 
-Asynchronous ShardAllocationStrategy
-====================================
-
-The methods of the ``ShardAllocationStrategy`` and ``AbstractShardAllocationStrategy`` in Cluster Sharding
-have changed return type to a ``Future`` to support asynchronous decision. For example you can ask an
-actor external actor of how to allocate shards or rebalance shards.
-
-For the synchronous case you can return the result via ``scala.concurrent.Future.successful`` in Scala or 
-``akka.dispatch.Futures.successful`` in Java.
-
 Akka Persistence
 ================
 
-Mendatory persistenceId
+Experimental removed
+--------------------
+
+The artifact name has changed from ``akka-persistence-experimental`` to ``akka-persistence``.
+
+New sbt dependency::
+
+  "com.typesafe.akka" %% "akka-persistence" % "@version@" @crossString@
+
+New Maven dependency::
+
+  <dependency>
+    <groupId>com.typesafe.akka</groupId>
+    <artifactId>akka-persistence_@binVersion@</artifactId>
+    <version>@version@</version>
+  </dependency>
+
+The artefact name of the Persistent TCK has changed from ``akka-persistence-tck-experimental`` (``akka-persistence-experimental-tck``) to
+``akka-persistence-tck``.
+
+Mandatory persistenceId
 -----------------------
 
 It is now mandatory to define the ``persistenceId`` in subclasses of ``PersistentActor``, ``UntypedPersistentActor``
@@ -365,6 +385,32 @@ The previous behaviour was never documented explicitly (nor was it a design goal
 have explicitly relied on this behaviour, however if you find yourself with an application that did exploit this you
 should rewrite it to explicitly store the ``ActorPath`` of where such replies during replay may have to be sent to,
 instead of relying on the sender reference during replay.
+
+max-message-batch-size config
+-----------------------------
+
+Configuration property ``akka.persistence.journal.max-message-batch-size`` has been moved into the plugin configuration
+section, to allow different values for different journal plugins. See ``reference.conf``.
+
+PersistentView is deprecated
+----------------------------
+
+``PersistentView`` is deprecated. Use :ref:`persistence-query-scala` instead. The corresponding
+query type is ``EventsByPersistenceId``. There are several alternatives for connecting the ``Source``
+to an actor corresponding to a previous ``PersistentView`` actor:
+
+* `Sink.actorRef`_ is simple, but has the disadvantage that there is no back-pressure signal from the 
+  destination actor, i.e. if the actor is not consuming the messages fast enough the mailbox of the actor will grow
+* `mapAsync`_ combined with :ref:`actors-ask-lambda` is almost as simple with the advantage of back-pressure
+  being propagated all the way
+* `ActorSubscriber`_ in case you need more fine grained control
+  
+The consuming actor may be a plain ``Actor`` or a ``PersistentActor`` if it needs to store its
+own state (e.g. fromSequenceNr offset).
+
+.. _Sink.actorRef: http://doc.akka.io/docs/akka-stream-and-http-experimental/1.0/scala/stream-integrations.html#Sink_actorRef
+.. _mapAsync: http://doc.akka.io/docs/akka-stream-and-http-experimental/1.0/stages-overview.html#Asynchronous_processing_stages
+.. _ActorSubscriber: http://doc.akka.io/docs/akka-stream-and-http-experimental/1.0/scala/stream-integrations.html#ActorSubscriber
 
 Persistence Plugin APIs
 =======================
@@ -498,3 +544,20 @@ signal for a completed recovery was named ``ReplayMessagesSuccess``.
 This is now fixed, and all methods use the same "recovery" wording consistently across the entire API.
 The old ``ReplayMessagesSuccess`` is now called ``RecoverySuccess``, and an additional method called ``onRecoveryFailure``
 has been introduced.
+
+AtLeastOnceDelivery deliver signature
+-------------------------------------
+The signature of ``deliver`` changed slightly in order to allow both ``ActorSelection`` and ``ActorPath`` to be
+used with it.
+
+Previously:
+
+    def deliver(destination: ActorPath, deliveryIdToMessage: Long ⇒ Any): Unit
+
+Now:
+
+    def deliver(destination: ActorSelection)(deliveryIdToMessage: Long ⇒ Any): Unit
+    def deliver(destination: ActorPath)(deliveryIdToMessage: Long ⇒ Any): Unit
+
+The Java API remains unchanged and has simply gained the 2nd overload which allows ``ActorSelection`` to be
+passed in directly (without converting to ``ActorPath``).

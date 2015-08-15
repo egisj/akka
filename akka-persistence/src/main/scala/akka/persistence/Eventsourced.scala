@@ -51,7 +51,7 @@ private[persistence] trait Eventsourced extends Snapshotter with Stash with Stas
   private val writerUuid = UUID.randomUUID.toString
 
   private var journalBatch = Vector.empty[PersistentEnvelope]
-  private val maxMessageBatchSize = extension.settings.journal.maxMessageBatchSize
+  private val maxMessageBatchSize = extension.journalConfigFor(journalPluginId).getInt("max-message-batch-size")
   private var writeInProgress = false
   private var sequenceNr: Long = 0L
   private var _lastSequenceNr: Long = 0L
@@ -288,7 +288,7 @@ private[persistence] trait Eventsourced extends Snapshotter with Stash with Stas
    * @param event event to be persisted
    * @param handler handler for each persisted `event`
    */
-  final def persist[A](event: A)(handler: A ⇒ Unit): Unit = {
+  def persist[A](event: A)(handler: A ⇒ Unit): Unit = {
     pendingStashingPersistInvocations += 1
     pendingInvocations addLast StashingHandlerInvocation(event, handler.asInstanceOf[Any ⇒ Unit])
     eventBatch = AtomicWrite(PersistentRepr(event, sender = sender())) :: eventBatch
@@ -302,7 +302,7 @@ private[persistence] trait Eventsourced extends Snapshotter with Stash with Stas
    * @param events events to be persisted
    * @param handler handler for each persisted `events`
    */
-  final def persistAll[A](events: immutable.Seq[A])(handler: A ⇒ Unit): Unit = {
+  def persistAll[A](events: immutable.Seq[A])(handler: A ⇒ Unit): Unit = {
     events.foreach { event ⇒
       pendingStashingPersistInvocations += 1
       pendingInvocations addLast StashingHandlerInvocation(event, handler.asInstanceOf[Any ⇒ Unit])
@@ -311,7 +311,7 @@ private[persistence] trait Eventsourced extends Snapshotter with Stash with Stas
   }
 
   @deprecated("use persistAll instead", "2.4")
-  final def persist[A](events: immutable.Seq[A])(handler: A ⇒ Unit): Unit =
+  def persist[A](events: immutable.Seq[A])(handler: A ⇒ Unit): Unit =
     persistAll(events)(handler)
 
   /**
@@ -337,7 +337,7 @@ private[persistence] trait Eventsourced extends Snapshotter with Stash with Stas
    * @param event event to be persisted
    * @param handler handler for each persisted `event`
    */
-  final def persistAsync[A](event: A)(handler: A ⇒ Unit): Unit = {
+  def persistAsync[A](event: A)(handler: A ⇒ Unit): Unit = {
     pendingInvocations addLast AsyncHandlerInvocation(event, handler.asInstanceOf[Any ⇒ Unit])
     eventBatch = AtomicWrite(PersistentRepr(event, sender = sender())) :: eventBatch
   }
@@ -350,7 +350,7 @@ private[persistence] trait Eventsourced extends Snapshotter with Stash with Stas
    * @param events events to be persisted
    * @param handler handler for each persisted `events`
    */
-  final def persistAllAsync[A](events: immutable.Seq[A])(handler: A ⇒ Unit): Unit = {
+  def persistAllAsync[A](events: immutable.Seq[A])(handler: A ⇒ Unit): Unit = {
     events.foreach { event ⇒
       pendingInvocations addLast AsyncHandlerInvocation(event, handler.asInstanceOf[Any ⇒ Unit])
     }
@@ -358,7 +358,7 @@ private[persistence] trait Eventsourced extends Snapshotter with Stash with Stas
   }
 
   @deprecated("use persistAllAsync instead", "2.4")
-  final def persistAsync[A](events: immutable.Seq[A])(handler: A ⇒ Unit): Unit =
+  def persistAsync[A](events: immutable.Seq[A])(handler: A ⇒ Unit): Unit =
     persistAllAsync(events)(handler)
 
   /**
@@ -378,7 +378,7 @@ private[persistence] trait Eventsourced extends Snapshotter with Stash with Stas
    * @param event event to be handled in the future, when preceding persist operations have been processes
    * @param handler handler for the given `event`
    */
-  final def deferAsync[A](event: A)(handler: A ⇒ Unit): Unit = {
+  def deferAsync[A](event: A)(handler: A ⇒ Unit): Unit = {
     if (pendingInvocations.isEmpty) {
       handler(event)
     } else {
@@ -390,7 +390,8 @@ private[persistence] trait Eventsourced extends Snapshotter with Stash with Stas
   /**
    * Permanently deletes all persistent messages with sequence numbers less than or equal `toSequenceNr`.
    *
-   * If the delete fails an [[akka.persistence.JournalProtocol.DeleteMessagesFailure]] will be sent to the actor.
+   * If the delete is successful a [[DeleteMessagesSuccess]] will be sent to the actor.
+   * If the delete fails a [[DeleteMessagesFailure]] will be sent to the actor.
    *
    * @param toSequenceNr upper sequence number bound of persistent messages to be deleted.
    */

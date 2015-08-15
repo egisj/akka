@@ -204,7 +204,7 @@ class PersistentActorFailureSpec extends PersistenceSpec(PersistenceSpec.config(
       expectMsg("Failure: wrong-1")
       expectTerminated(persistentActor)
     }
-    "call onPersistFailure and stop if persistAsync fails xoxo" in {
+    "call onPersistFailure and stop if persistAsync fails" in {
       system.actorOf(Props(classOf[Supervisor], testActor)) ! Props(classOf[AsyncPersistPersistentActor], name)
       val persistentActor = expectMsgType[ActorRef]
       persistentActor ! Cmd("a")
@@ -286,6 +286,34 @@ class PersistentActorFailureSpec extends PersistenceSpec(PersistenceSpec.config(
       persistentActor ! GetState
       // err was stored, and was be replayed
       expectMsg(List("a", "b", "err", "c", "d"))
+    }
+
+    "detect overlapping writers during replay" in {
+      val p1 = namedPersistentActor[Behavior1PersistentActor]
+      p1 ! Cmd("a")
+      p1 ! GetState
+      expectMsg(List("a-1", "a-2"))
+
+      // create another with same persistenceId
+      val p2 = namedPersistentActor[Behavior1PersistentActor]
+      p2 ! GetState
+      expectMsg(List("a-1", "a-2"))
+
+      // continue writing from the old writer
+      p1 ! Cmd("b")
+      p1 ! GetState
+      expectMsg(List("a-1", "a-2", "b-1", "b-2"))
+
+      p2 ! Cmd("c")
+      p2 ! GetState
+      expectMsg(List("a-1", "a-2", "c-1", "c-2"))
+
+      // Create yet another one with same persistenceId, b-1 and b-2 discarded during replay
+      EventFilter.warning(start = "Invalid replayed event", occurrences = 2) intercept {
+        val p3 = namedPersistentActor[Behavior1PersistentActor]
+        p3 ! GetState
+        expectMsg(List("a-1", "a-2", "c-1", "c-2"))
+      }
     }
 
   }

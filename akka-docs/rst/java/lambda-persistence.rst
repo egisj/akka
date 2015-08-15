@@ -14,28 +14,10 @@ changes to these actors from which they can rebuild internal state. This can be 
 or starting from a snapshot which can dramatically reduce recovery times. Akka persistence also provides point-to-point
 communication with at-least-once message delivery semantics.
 
-.. warning::
-
-  This module is marked as **“experimental”** as of its introduction in Akka 2.3.0. We will continue to
-  improve this API based on our users’ feedback, which implies that while we try to keep incompatible
-  changes to a minimum the binary compatibility guarantee for maintenance releases does not apply to the
-  contents of the ``akka.persistence`` package.
-
 Akka persistence is inspired by the `eventsourced`_ library. It follows the same concepts and architecture of
 `eventsourced`_ but significantly differs on API and implementation level.
 
 .. _eventsourced: https://github.com/eligosource/eventsourced
-
-Changes in Akka 2.3.4
-=====================
-
-In Akka 2.3.4 several of the concepts of the earlier versions were collapsed and simplified.
-In essence; ``Processor`` and ``EventsourcedProcessor`` are replaced by ``PersistentActor``. ``Channel``
-and ``PersistentChannel`` are replaced by ``AtLeastOnceDelivery``. ``View`` is replaced by ``PersistentView``.
-
-See full details of the changes in the :ref:`migration-guide-persistence-experimental-2.3.x-2.4.x`.
-The old classes are still included, and deprecated, for a while to make the transition smooth.
-In case you need the old documentation it is located `here <http://doc.akka.io/docs/akka/2.3.3/java/lambda-persistence.html#persistence-lambda-java>`_.
 
 Dependencies
 ============
@@ -44,7 +26,7 @@ Akka persistence is a separate jar file. Make sure that you have the following d
 
   <dependency>
     <groupId>com.typesafe.akka</groupId>
-    <artifactId>akka-persistence-experimental_@binVersion@</artifactId>
+    <artifactId>akka-persistence_@binVersion@</artifactId>
     <version>@version@</version>
   </dependency>
 
@@ -79,7 +61,7 @@ Architecture
 * *AbstractPersistentActorAtLeastOnceDelivery*: To send messages with at-least-once delivery semantics to destinations, also in
   case of sender and receiver JVM crashes.
 
-* *Journal*: A journal stores the sequence of messages sent to a persistent actor. An application can control which messages
+* *AsyncWriteJournal*: A journal stores the sequence of messages sent to a persistent actor. An application can control which messages
   are journaled and which are received by the persistent actor without being journaled. The storage backend of a journal is pluggable. 
   Persistence extension comes with a "leveldb" journal plugin, which writes to the local filesystem, 
   and replicated journals are available as `Community plugins`_.
@@ -353,6 +335,9 @@ Deleting messages in event sourcing based applications is typically either not u
 up until the sequence number of the data held by that snapshot can be issued, to safely delete the previous events,
 while still having access to the accumulated state during replays - by loading the snapshot.
 
+The result of the ``deleteMessages`` request is signaled to the persistent actor with a ``DeleteMessagesSuccess`` 
+message if the delete was successful or a ``DeleteMessagesFailure`` message if it failed.
+
 Persistence status handling
 ---------------------------
 Persisting, deleting and replaying messages can either succeed or fail.
@@ -395,6 +380,25 @@ restarts of the persistent actor.
 
 Views
 =====
+
+.. warning::
+
+  ``AbstractPersistentView`` is deprecated. Use :ref:`persistence-query-java` instead. The corresponding
+  query type is ``EventsByPersistenceId``. There are several alternatives for connecting the ``Source``
+  to an actor corresponding to a previous ``UntypedPersistentView`` actor:
+  
+  * `Sink.actorRef`_ is simple, but has the disadvantage that there is no back-pressure signal from the 
+    destination actor, i.e. if the actor is not consuming the messages fast enough the mailbox of the actor will grow
+  * `mapAsync`_ combined with :ref:`actors-ask-lambda` is almost as simple with the advantage of back-pressure
+    being propagated all the way
+  * `ActorSubscriber`_ in case you need more fine grained control
+  
+  The consuming actor may be a plain ``AbstractActor`` or an ``AbstractPersistentActor`` if it needs to store its
+  own state (e.g. fromSequenceNr offset).
+
+.. _Sink.actorRef: http://doc.akka.io/docs/akka-stream-and-http-experimental/1.0/java/stream-integrations.html#Sink_actorRef
+.. _mapAsync: http://doc.akka.io/docs/akka-stream-and-http-experimental/1.0/stages-overview.html#Asynchronous_processing_stages
+.. _ActorSubscriber: http://doc.akka.io/docs/akka-stream-and-http-experimental/1.0/java/stream-integrations.html#ActorSubscriber
 
 Persistent views can be implemented by extending the ``AbstractView`` abstract class, implement the ``persistenceId`` method
 and setting the “initial behavior” in the constructor by calling the :meth:`receive` method.
@@ -484,6 +488,14 @@ and at least one of these snapshots matches the ``SnapshotSelectionCriteria`` th
 If not specified, they default to ``SnapshotSelectionCriteria.latest()`` which selects the latest (= youngest) snapshot.
 To disable snapshot-based recovery, applications should use ``SnapshotSelectionCriteria.none()``. A recovery where no
 saved snapshot matches the specified ``SnapshotSelectionCriteria`` will replay all journaled messages.
+
+.. note::
+  In order to use snapshots a default snapshot-store (``akka.persistence.snapshot-store.plugin``) must be configured,
+  or the persistent actor can pick a snapshot store explicitly by overriding ``String snapshotPluginId()``.
+
+  Since it is acceptable for some applications to not use any snapshotting, it is legal to not configure a snapshot store,
+  however Akka will log a warning message when this situation is detected and then continue to operate until
+  an actor tries to store a snapshot, at which point the the operation will fail (by replying with an ``SaveSnapshotFailure`` for example).
 
 Snapshot deletion
 -----------------
@@ -596,20 +608,67 @@ not accept more messages and it will throw ``AtLeastOnceDelivery.MaxUnconfirmedM
 The default value can be configured with the ``akka.persistence.at-least-once-delivery.max-unconfirmed-messages``
 configuration key. The method can be overridden by implementation classes to return non-default values.
 
+.. _event-adapters-lambda:
+
+Event Adapters
+==============
+
+In long running projects using event sourcing sometimes the need arises to detach the data model from the domain model
+completely.
+
+Event Adapters help in situations where:
+
+- **Version Migrations** – existing events stored in *Version 1* should be "upcasted" to a new *Version 2* representation,
+  and the process of doing so involves actual code, not just changes on the serialization layer. For these scenarios
+  the ``toJournal`` function is usually an identity function, however the ``fromJournal`` is implemented as
+  ``v1.Event=>v2.Event``, performing the neccessary mapping inside the fromJournal method.
+  This technique is sometimes refered to as "upcasting" in other CQRS libraries.
+- **Separating Domain and Data models** – thanks to EventAdapters it is possible to completely separate the domain model
+  from the model used to persist data in the Journals. For example one may want to use case classes in the
+  domain model, however persist their protocol-buffer (or any other binary serialization format) counter-parts to the Journal.
+  A simple ``toJournal:MyModel=>MyDataModel`` and ``fromJournal:MyDataModel=>MyModel`` adapter can be used to implement this feature.
+- **Journal Specialized Data Types** – exposing data types understood by the underlying Journal, for example for data stores which
+  understand JSON it is possible to write an EventAdapter ``toJournal:Any=>JSON`` such that the Journal can *directly* store the
+  json instead of serializing the object to its binary representation.
+
+Implementing an EventAdapter is rather stright forward:
+
+.. includecode:: code/docs/persistence/PersistenceEventAdapterDocTest.java#identity-event-adapter
+
+Then in order for it to be used on events coming to and from the journal you must bind it using the below configuration syntax:
+
+.. includecode:: ../scala/code/docs/persistence/PersistenceEventAdapterDocSpec.scala#event-adapters-config
+
+It is possible to bind multiple adapters to one class *for recovery*, in which case the ``fromJournal`` methods of all
+bound adapters will be applied to a given matching event (in order of definition in the configuration). Since each adapter may
+return from ``0`` to ``n`` adapted events (called as ``EventSeq``), each adapter can investigate the event and if it should
+indeed adapt it return the adapted event(s) for it, other adapters which do not have anything to contribute during this
+adaptation simply return ``EventSeq.empty``. The adapted events are then delivered in-order to the ``PersistentActor`` during replay.
+
+.. note::
+  For more advanced schema evolution techniques refer to the :ref:`persistence-schema-evolution-scala` documentation.
+
 .. _persistent-fsm-java-lambda:
 
 Persistent FSM
 ==============
-``AbstractPersistentFSMActor`` handles the incoming messages in an FSM like fashion.
+``AbstractPersistentFSM`` handles the incoming messages in an FSM like fashion.
 Its internal state is persisted as a sequence of changes, later referred to as domain events.
 Relationship between incoming messages, FSM's states and transitions, persistence of domain events is defined by a DSL.
 
+.. warning::
+
+  ``AbstractPersistentFSM`` is marked as **“experimental”** as of its introduction in Akka 2.4.0. We will continue to
+  improve this API based on our users’ feedback, which implies that while we try to keep incompatible
+  changes to a minimum the binary compatibility guarantee for maintenance releases does not apply to the
+  contents of the `classes related to ``AbstractPersistentFSM``.
+
 A Simple Example
 ----------------
-To demonstrate the features of the ``AbstractPersistentFSMActor``, consider an actor which represents a Web store customer.
+To demonstrate the features of the ``AbstractPersistentFSM``, consider an actor which represents a Web store customer.
 The contract of our "WebStoreCustomerFSMActor" is that it accepts the following commands:
 
-.. includecode:: ../../../akka-persistence/src/test/java/akka/persistence/fsm/AbstractPersistentFsmActorTest.java#customer-commands
+.. includecode:: ../../../akka-persistence/src/test/java/akka/persistence/fsm/AbstractPersistentFSMTest.java#customer-commands
 
 ``AddItem`` sent when the customer adds an item to a shopping cart
 ``Buy`` - when the customer finishes the purchase
@@ -618,7 +677,7 @@ The contract of our "WebStoreCustomerFSMActor" is that it accepts the following 
 
 The customer can be in one of the following states:
 
-.. includecode:: ../../../akka-persistence/src/test/java/akka/persistence/fsm/AbstractPersistentFsmActorTest.java#customer-states
+.. includecode:: ../../../akka-persistence/src/test/java/akka/persistence/fsm/AbstractPersistentFSMTest.java#customer-states
 
 ``LookingAround`` customer is browsing the site, but hasn't added anything to the shopping cart
 ``Shopping`` customer has recently added items to the shopping cart
@@ -627,29 +686,29 @@ The customer can be in one of the following states:
 
 .. note::
 
-  ``AbstractPersistentFSMActor`` states must inherit from ``PersistentFsmActor.FSMState`` and implement the
+  ``AbstractPersistentFSM`` states must inherit from ``PersistentFSM.FSMState`` and implement the
   ``String identifier()`` method. This is required in order to simplify the serialization of FSM states.
   String identifiers should be unique!
 
 Customer's actions are "recorded" as a sequence of "domain events", which are persisted. Those events are replayed on actor's
 start in order to restore the latest customer's state:
 
-.. includecode:: ../../../akka-persistence/src/test/java/akka/persistence/fsm/AbstractPersistentFsmActorTest.java#customer-domain-events
+.. includecode:: ../../../akka-persistence/src/test/java/akka/persistence/fsm/AbstractPersistentFSMTest.java#customer-domain-events
 
 Customer state data represents the items in customer's shopping cart:
 
-.. includecode:: ../../../akka-persistence/src/test/java/akka/persistence/fsm/AbstractPersistentFsmActorTest.java#customer-states-data
+.. includecode:: ../../../akka-persistence/src/test/java/akka/persistence/fsm/AbstractPersistentFSMTest.java#customer-states-data
 
 Here is how everything is wired together:
 
-.. includecode:: ../../../akka-persistence/src/test/java/akka/persistence/fsm/AbstractPersistentFsmActorTest.java#customer-fsm-body
+.. includecode:: ../../../akka-persistence/src/test/java/akka/persistence/fsm/AbstractPersistentFSMTest.java#customer-fsm-body
 
 .. note::
 
   State data can only be modified directly on initialization. Later it's modified only as a result of applying domain events.
   Override the ``applyEvent`` method to define how state data is affected by domain events, see the example below
 
-.. includecode:: ../../../akka-persistence/src/test/java/akka/persistence/fsm/AbstractPersistentFsmActorTest.java#customer-apply-event
+.. includecode:: ../../../akka-persistence/src/test/java/akka/persistence/fsm/AbstractPersistentFSMTest.java#customer-apply-event
 
 Storage plugins
 ===============
@@ -698,8 +757,13 @@ A journal plugin can be activated with the following minimal configuration:
 .. includecode:: ../scala/code/docs/persistence/PersistencePluginDocSpec.scala#journal-plugin-config
 
 The specified plugin ``class`` must have a no-arg constructor. The ``plugin-dispatcher`` is the dispatcher
-used for the plugin actor. If not specified, it defaults to ``akka.persistence.dispatchers.default-plugin-dispatcher``
-for ``SyncWriteJournal`` plugins and ``akka.actor.default-dispatcher`` for ``AsyncWriteJournal`` plugins.
+used for the plugin actor. If not specified, it defaults to ``akka.persistence.dispatchers.default-plugin-dispatcher``.
+
+The journal plugin instance is an actor so the methods corresponding to requests from persistent actors
+are executed sequentially. It may delegate to asynchronous libraries, spawn futures, or delegate to other
+actors to achive parallelism. 
+
+Don't run journal tasks/futures on the system default dispatcher, since that might starve other tasks. 
 
 Snapshot store plugin API
 -------------------------
@@ -714,6 +778,12 @@ A snapshot store plugin can be activated with the following minimal configuratio
 
 The specified plugin ``class`` must have a no-arg constructor. The ``plugin-dispatcher`` is the dispatcher
 used for the plugin actor. If not specified, it defaults to ``akka.persistence.dispatchers.default-plugin-dispatcher``.
+
+The snapshot store instance is an actor so the methods corresponding to requests from persistent actors
+are executed sequentially. It may delegate to asynchronous libraries, spawn futures, or delegate to other
+actors to achive parallelism.
+
+Don't run snapshot store tasks/futures on the system default dispatcher, since that might starve other tasks.
 
 Pre-packaged plugins
 ====================
@@ -793,6 +863,8 @@ it must add
 
 to the application configuration. If not specified, a default serializer is used.
 
+For more advanced schema evolution techniques refer to the :ref:`persistence-schema-evolution-scala` documentation.
+
 Testing
 =======
 
@@ -806,6 +878,14 @@ or
 .. includecode:: ../scala/code/docs/persistence/PersistencePluginDocSpec.scala#shared-store-native-config
 
 in your Akka configuration. The LevelDB Java port is for testing purposes only.
+
+.. warning::
+  It is not possible to test persistence provided classes (i.e. :ref:`PersistentActor <event-sourcing-java>`
+  and :ref:`AtLeastOnceDelivery <at-least-once-delivery-java>`) using ``TestActorRef`` due to its *synchronous* nature.
+  These traits need to be able to perform asynchronous tasks in the background in order to handle internal persistence
+  related events.
+
+  When testing Persistence based projects always rely on :ref:`asynchronous messaging using the TestKit <async-integration-testing-java>`.
 
 Multiple persistence plugin configurations
 ==========================================

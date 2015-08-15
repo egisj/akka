@@ -10,15 +10,19 @@ object Dependencies {
   lazy val scalaCheckVersion = settingKey[String]("The version of ScalaCheck to use.")
 
   val Versions = Seq(
-    crossScalaVersions := Seq("2.11.6", "2.12.0-M1"),
+    crossScalaVersions := Seq("2.11.6"), //"2.12.0-M2"
     scalaVersion := crossScalaVersions.value.head,
     scalaStmVersion := sys.props.get("akka.build.scalaStmVersion").getOrElse("0.7"),
     scalaCheckVersion := sys.props.get("akka.build.scalaCheckVersion").getOrElse("1.11.6"),
-    scalaTestVersion := (if (scalaVersion.value == "2.12.0-M1") "2.2.5-M1" else "2.2.4")
+    scalaTestVersion := (if (scalaVersion.value == "2.12.0-M2") "2.2.5-M2" else "2.2.4")
   )
 
   object Compile {
     // Compile
+
+    // Akka Streams // FIXME: change to project dependency once merged before 2.4.0
+    val akkaStream = "com.typesafe.akka" %% "akka-stream-experimental" % "1.0"
+
     val camelCore     = "org.apache.camel"            % "camel-core"                   % "2.13.4" exclude("org.slf4j", "slf4j-api") // ApacheV2
 
     // when updating config version, update links ActorSystem ScalaDoc to link to the updated version
@@ -108,6 +112,8 @@ object Dependencies {
 
   val persistence = l ++= Seq(protobuf, Provided.levelDB, Provided.levelDBNative, Test.scalatest.value, Test.junit, Test.commonsIo, Test.scalaXml)
 
+  val persistenceQuery = l ++= Seq(akkaStream, Test.scalatest.value, Test.junit, Test.commonsIo)
+
   val persistenceTck = l ++= Seq(Test.scalatest.value.copy(configurations = Some("compile")), Test.junit.copy(configurations = Some("compile")))
 
   val kernel = l ++= Seq(Test.scalatest.value, Test.junit)
@@ -119,4 +125,6 @@ object Dependencies {
   val docs = l ++= Seq(Test.scalatest.value, Test.junit, Test.junitIntf, Docs.sprayJson, Docs.gson)
 
   val contrib = l ++= Seq(Test.junitIntf, Test.commonsIo)
+  
+  val benchJmh = l ++= Seq(Provided.levelDB, Provided.levelDBNative)
 }

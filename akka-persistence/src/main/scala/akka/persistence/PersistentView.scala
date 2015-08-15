@@ -79,7 +79,9 @@ private[akka] object PersistentView {
  *
  *  - [[autoUpdate]] for turning automated updates on or off
  *  - [[autoUpdateReplayMax]] for limiting the number of replayed messages per view update cycle
+ *
  */
+@deprecated("use Persistence Query instead", "2.4")
 trait PersistentView extends Actor with Snapshotter with Stash with StashFactory
   with PersistenceIdentity with PersistenceRecovery
   with ActorLogging {
@@ -361,6 +363,10 @@ trait PersistentView extends Actor with Snapshotter with Stash with StashFactory
     override def recoveryRunning: Boolean = false
 
     override def stateReceive(receive: Receive, message: Any): Unit = message match {
+      case ReplayedMessage(p) ⇒
+        // we can get ReplayedMessage here if it was stashed by user during replay
+        // unwrap the payload
+        PersistentView.super.aroundReceive(receive, p.payload)
       case ScheduledUpdate(replayMax)     ⇒ changeStateToReplayStarted(await = false, replayMax)
       case Update(awaitUpdate, replayMax) ⇒ changeStateToReplayStarted(awaitUpdate, replayMax)
       case other                          ⇒ PersistentView.super.aroundReceive(receive, other)
@@ -379,6 +385,7 @@ trait PersistentView extends Actor with Snapshotter with Stash with StashFactory
  *
  * @see [[PersistentView]]
  */
+@deprecated("use Persistence Query instead", "2.4")
 abstract class UntypedPersistentView extends UntypedActor with PersistentView
 
 /**
@@ -386,4 +393,5 @@ abstract class UntypedPersistentView extends UntypedActor with PersistentView
  *
  * @see [[PersistentView]]
  */
+@deprecated("use Persistence Query instead", "2.4")
 abstract class AbstractPersistentView extends AbstractActor with PersistentView
