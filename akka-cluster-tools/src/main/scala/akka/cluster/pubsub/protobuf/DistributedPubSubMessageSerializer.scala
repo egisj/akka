@@ -10,12 +10,11 @@ import akka.actor.{ ExtendedActorSystem, Address }
 import scala.Some
 import scala.collection.immutable
 import java.io.{ ByteArrayInputStream, ObjectOutputStream, ByteArrayOutputStream }
-import com.google.protobuf.ByteString
+import akka.protobuf.{ ByteString, MessageLite }
 import akka.util.ClassLoaderObjectInputStream
 import java.{ lang ⇒ jl }
 import java.util.zip.GZIPOutputStream
 import java.util.zip.GZIPInputStream
-import com.google.protobuf.MessageLite
 import scala.annotation.tailrec
 import akka.cluster.pubsub.protobuf.msg.{ DistributedPubSubMessages ⇒ dm }
 import scala.collection.JavaConverters._
@@ -30,9 +29,9 @@ import scala.collection.immutable.TreeMap
 import akka.serialization.SerializerWithStringManifest
 
 /**
- * Protobuf serializer of DistributedPubSubMediator messages.
+ * INTERNAL API: Protobuf serializer of DistributedPubSubMediator messages.
  */
-class DistributedPubSubMessageSerializer(val system: ExtendedActorSystem)
+private[akka] class DistributedPubSubMessageSerializer(val system: ExtendedActorSystem)
   extends SerializerWithStringManifest with BaseSerializer {
 
   private lazy val serialization = SerializationExtension(system)
@@ -79,7 +78,7 @@ class DistributedPubSubMessageSerializer(val system: ExtendedActorSystem)
         s"Unimplemented deserialization of message with manifest [$manifest] in [${getClass.getName}]")
     }
 
-  def compress(msg: MessageLite): Array[Byte] = {
+  private def compress(msg: MessageLite): Array[Byte] = {
     val bos = new ByteArrayOutputStream(BufferSize)
     val zip = new GZIPOutputStream(bos)
     msg.writeTo(zip)
@@ -87,7 +86,7 @@ class DistributedPubSubMessageSerializer(val system: ExtendedActorSystem)
     bos.toByteArray
   }
 
-  def decompress(bytes: Array[Byte]): Array[Byte] = {
+  private def decompress(bytes: Array[Byte]): Array[Byte] = {
     val in = new GZIPInputStream(new ByteArrayInputStream(bytes))
     val out = new ByteArrayOutputStream()
     val buffer = new Array[Byte](BufferSize)

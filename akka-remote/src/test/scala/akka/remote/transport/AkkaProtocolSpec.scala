@@ -9,7 +9,7 @@ import akka.remote.transport.Transport._
 import akka.remote.{ SeqNo, WireFormats, RemoteActorRefProvider, FailureDetector }
 import akka.testkit.{ ImplicitSender, AkkaSpec }
 import akka.util.ByteString
-import com.google.protobuf.{ ByteString ⇒ PByteString }
+import akka.protobuf.{ ByteString ⇒ PByteString }
 import com.typesafe.config.ConfigFactory
 import scala.concurrent.duration._
 import scala.concurrent.{ Await, Promise }
@@ -38,7 +38,6 @@ class AkkaProtocolSpec extends AkkaSpec("""akka.actor.provider = "akka.remote.Re
 
         transport-failure-detector {
           implementation-class = "akka.remote.PhiAccrualFailureDetector"
-          threshold = 7.0
           max-sample-size = 100
           min-std-deviation = 100 ms
           acceptable-heartbeat-pause = 3 s

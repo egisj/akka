@@ -11,6 +11,8 @@ OSGi.persistenceQuery
 
 Dependencies.persistenceQuery
 
-//MimaKeys.previousArtifact := akkaPreviousArtifact("akka-persistence-query-experimental").value
+MimaKeys.previousArtifact := akkaPreviousArtifact("akka-persistence-query-experimental").value
 
 enablePlugins(ScaladocNoVerificationOfDiagrams)
+
+fork in Test := true

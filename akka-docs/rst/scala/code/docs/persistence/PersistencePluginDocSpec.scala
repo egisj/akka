@@ -26,8 +26,18 @@ import akka.persistence.snapshot._
 object PersistencePluginDocSpec {
   val config =
     """
+      //#leveldb-plugin-config
+      # Path to the journal plugin to be used
+      akka.persistence.journal.plugin = "akka.persistence.journal.leveldb"
+      //#leveldb-plugin-config
+
+      //#leveldb-snapshot-plugin-config
+      # Path to the snapshot store plugin to be used
+      akka.persistence.snapshot-store.plugin = "akka.persistence.snapshot-store.local"
+      //#leveldb-snapshot-plugin-config
+
       //#max-message-batch-size
-      akka.persistence.journal.max-message-batch-size = 200
+      akka.persistence.journal.leveldb.max-message-batch-size = 200
       //#max-message-batch-size
       //#journal-config
       akka.persistence.journal.leveldb.dir = "target/journal"
@@ -120,6 +130,7 @@ trait SharedLeveldbPluginDocSpec {
 
   new AnyRef {
     import akka.actor._
+    //#shared-store-creation
     import akka.persistence.journal.leveldb.SharedLeveldbStore
 
     val store = system.actorOf(Props[SharedLeveldbStore], "store")

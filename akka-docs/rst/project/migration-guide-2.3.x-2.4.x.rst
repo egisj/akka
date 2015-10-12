@@ -70,6 +70,18 @@ The following, previously deprecated, features have been removed:
 
 * Java API TestKit.dilated, moved to JavaTestKit.dilated
 
+Protobuf Dependency
+===================
+
+The transitive dependency to Protobuf has been removed to make it possible to use any version
+of Protobuf for the application messages. If you use Protobuf in your application you need
+to add the following dependency with desired version number::
+
+    "com.google.protobuf" % "protobuf-java" % "2.5.0" 
+
+Internally Akka is using an embedded version of protobuf that corresponds to ``com.google.protobuf/protobuf-java``
+version 2.5.0. The package name of the embedded classes has been changed to ``akka.protobuf``.
+
 Added parameter validation to RootActorPath
 ===========================================
 Previously ``akka.actor.RootActorPath`` allowed passing in arbitrary strings into its name parameter,
@@ -139,6 +151,13 @@ If you use ``Slf4jLogger`` you should add the following configuration::
 It will filter the log events using the backend configuration (e.g. logback.xml) before
 they are published to the event bus.
 
+Inbox.receive Java API
+======================
+
+``Inbox.receive`` now throws a checked ``java.util.concurrent.TimeoutException`` exception if the receive timeout
+is reached.
+
+
 Pool routers nrOfInstances method now takes ActorSystem
 =======================================================
 
@@ -146,6 +165,29 @@ In order to make cluster routers smarter about when they can start local routees
 ``nrOfInstances`` defined on ``Pool`` now takes ``ActorSystem`` as an argument.
 In case you have implemented a custom Pool you will have to update the method's signature,
 however the implementation can remain the same if you don't need to rely on an ActorSystem in your logic.
+
+Group routers paths method now takes ActorSystem
+================================================
+
+In order to make cluster routers smarter about when they can start local routees,
+``paths`` defined on ``Group`` now takes ``ActorSystem`` as an argument.
+In case you have implemented a custom Group you will have to update the method's signature,
+however the implementation can remain the same if you don't need to rely on an ActorSystem in your logic.
+
+Cluster aware router max-total-nr-of-instances
+==============================================
+
+In 2.3.x the deployment configuration property ``nr-of-instances`` was used for
+cluster aware routers to specify total number of routees in the cluster.
+This was confusing, especially since the default value is 1.
+
+In 2.4.x there is a new deployement property ``cluster.max-total-nr-of-instances`` that 
+defines total number of routees in the cluster. By default ``max-total-nr-of-instances`` 
+is set to a high value (10000) that will result in new routees added to the router when nodes join the cluster.
+Set it to a lower value if you want to limit total number of routees.
+
+For backwards compatibility reasons ``nr-of-instances`` is still used if defined by user,
+i.e. if defined it takes precedence over ``max-total-nr-of-instances``.
 
 Logger names use full class name 
 ================================
@@ -166,6 +208,12 @@ Secure Cookies
 ==============
 
 `Secure cookies` feature was deprecated.
+
+AES128CounterInetRNG and AES256CounterInetRNG are Deprecated
+============================================================
+
+Use ``AES128CounterSecureRNG`` or ``AES256CounterSecureRNG`` as 
+``akka.remote.netty.ssl.security.random-number-generator``. 
 
 Microkernel is Deprecated
 =========================
@@ -247,6 +295,26 @@ actor external actor of how to allocate shards or rebalance shards.
 For the synchronous case you can return the result via ``scala.concurrent.Future.successful`` in Scala or 
 ``akka.dispatch.Futures.successful`` in Java.
 
+Cluster Sharding internal data
+==============================
+
+The Cluster Sharding coordinator stores the locations of the shards using Akka Persistence.
+This data can safely be removed when restarting the whole Akka Cluster.
+
+The serialization format of the internal persistent events stored by the Cluster Sharding coordinator
+has been changed and it cannot load old data from 2.3.x or some 2.4 milestone.
+
+The ``persistenceId`` of the Cluster Sharding coordinator has been changed since 2.3.x so
+it should not load such old data, but it can be a problem if you have used a 2.4
+milestone release. In that case you should remove the persistent data that the 
+Cluster Sharding coordinator stored. Note that this is not application data.
+
+You can use the :ref:`RemoveInternalClusterShardingData <RemoveInternalClusterShardingData-scala>`
+utility program to remove this data.
+
+The new ``persistenceId`` is ``s"/sharding/${typeName}Coordinator"``.
+The old ``persistenceId`` is ``s"/user/sharding/${typeName}Coordinator/singleton/coordinator"``.  
+
 ClusterSingletonManager and ClusterSingletonProxy construction
 ==============================================================
 
@@ -297,6 +365,17 @@ is now started as a ``system`` actor instead of a ``user`` actor, i.e. the defau
 the ``ClusterClient`` initial contacts has changed to
 ``"akka.tcp://system@hostname:port/system/receptionist"``.  
 
+ClusterClient sender
+====================
+
+In 2.3 the ``sender()`` of the response messages, as seen by the client, was the 
+actor in cluster.
+
+In 2.4 the ``sender()`` of the response messages, as seen by the client, is ``deadLetters``
+since the client should normally send subsequent messages via the ``ClusterClient``.
+It is possible to pass the the original sender inside the reply messages if
+the client is supposed to communicate directly to the actor in the cluster.
+
 Akka Persistence
 ================
 
@@ -334,6 +413,12 @@ implement it yourself either as a helper trait or simply by overriding ``persist
 
     override def persistenceId = self.path.toStringWithoutAddress
 
+Failures
+--------
+
+Backend journal failures during recovery and persist are treated differently than in 2.3.x. The ``PersistenceFailure``
+message is removed and the actor is unconditionally stopped. The new behavior and reasons for it is explained in
+:ref:`failures-scala`. 
 
 Persist sequence of events
 --------------------------

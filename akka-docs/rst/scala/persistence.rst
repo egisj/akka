@@ -61,7 +61,7 @@ Architecture
 
 .. _Community plugins: http://akka.io/community/
 
-.. _event-sourcing:
+.. _event-sourcing-scala:
 
 Event sourcing
 ==============
@@ -102,7 +102,20 @@ about successful state changes by publishing events.
 
 When persisting events with ``persist`` it is guaranteed that the persistent actor will not receive further commands between
 the ``persist`` call and the execution(s) of the associated event handler. This also holds for multiple ``persist``
-calls in context of a single command.
+calls in context of a single command. Incoming messages are :ref:`stashed <stash-scala>` until the ``persist``
+is completed. You should be careful to not send more messages to a persistent actor than it can keep up with,
+otherwise the number of stashed messages will grow. It can be wise to protect against `OutOfMemoryError`
+by defining a maximum stash capacity in the mailbox configuration::
+
+    akka.actor.default-mailbox.stash-capacity=10000  
+
+If the stash capacity is exceeded for an actor the stashed messages are discarded and a
+``MessageQueueAppendFailedException`` is thrown, causing actor restart if default supervision
+strategy is used.
+
+Note that the stash capacity is per actor. If you have many persistent actors, e.g. when using cluster sharding,
+you may need to define a small stash capacity to ensure that the total number of stashed messages in the system
+don't consume too much memory.
 
 If persistence of an event fails, ``onPersistFailure`` will be invoked (logging the error by default)
 and the actor will unconditionally be stopped. If persistence of an event is rejected before it is
@@ -321,7 +334,7 @@ It is possible to delete all messages (journaled by a single persistent actor) u
 persistent actors may call the ``deleteMessages`` method.
 
 Deleting messages in event sourcing based applications is typically either not used at all, or used in conjunction with
-:ref:`snapshotting <snapshots>`, i.e. after a snapshot has been successfully stored, a ``deleteMessagess(toSequenceNr)``
+:ref:`snapshotting <snapshots>`, i.e. after a snapshot has been successfully stored, a ``deleteMessages(toSequenceNr)``
 up until the sequence number of the data held by that snapshot can be issued, to safely delete the previous events,
 while still having access to the accumulated state during replays - by loading the snapshot.
 
@@ -366,6 +379,31 @@ restarts of the persistent actor.
 
 .. _Thundering herd problem: https://en.wikipedia.org/wiki/Thundering_herd_problem
 
+.. _safe-shutdown-scala:
+
+Safely shutting down persistent actors
+--------------------------------------
+
+Special care should be given when when shutting down persistent actors from the outside.
+With normal Actors it is often acceptable to use the special :ref:`PoisonPill <poison-pill-scala>` message
+to signal to an Actor that it should stop itself once it receives this message – in fact this message is handled
+automatically by Akka, leaving the target actor no way to refuse stopping itself when given a poison pill.
+
+This can be dangerous when used with :class:`PersistentActor` due to the fact that incoming commands are *stashed* while
+the persistent actor is awaiting confirmation from the Journal that events have been written when ``persist()`` was used.
+Since the incoming commands will be drained from the Actor's mailbox and put into it's internal stash while awaiting the
+confirmation (thus, before calling the persist handlers) the Actor **may receive and (auto)handle the PoisonPill
+before it processes the other messages which have been put into its stash**, causing a pre-mature shutdown of the Actor.
+
+.. warning::
+  Consider using explicit shut-down messages instead of :class:`PoisonPill` when working with persistent actors.
+
+The example below highlights how messages arrive in the Actor's mailbox and how they interact with it's internal stashing
+mechanism when ``persist()`` is used, notice the early stop behaviour that occurs when ``PoisonPill`` is used:
+
+.. includecode:: code/docs/persistence/PersistenceDocSpec.scala#safe-shutdown
+.. includecode:: code/docs/persistence/PersistenceDocSpec.scala#safe-shutdown-example-bad
+.. includecode:: code/docs/persistence/PersistenceDocSpec.scala#safe-shutdown-example-good
 
 .. _persistent-views:
 
@@ -491,6 +529,8 @@ saved snapshot matches the specified ``SnapshotSelectionCriteria`` will replay a
   Since it is acceptable for some applications to not use any snapshotting, it is legal to not configure a snapshot store,
   however Akka will log a warning message when this situation is detected and then continue to operate until
   an actor tries to store a snapshot, at which point the the operation will fail (by replying with an ``SaveSnapshotFailure`` for example).
+  
+  Note that :ref:`cluster_sharding_scala` is using snapshots, so if you use Cluster Sharding you need to define a snapshot store plugin.
 
 Snapshot deletion
 -----------------
@@ -519,7 +559,7 @@ If failure messages are left unhandled by the actor, a default warning log messa
 No default action is performed on the success messages, however you're free to handle them e.g. in order to delete
 an in memory representation of the snapshot, or in the case of failure to attempt save the snapshot again.
 
-.. _at-least-once-delivery:
+.. _at-least-once-delivery-scala:
 
 At-Least-Once Delivery
 ======================
@@ -527,6 +567,12 @@ At-Least-Once Delivery
 To send messages with at-least-once delivery semantics to destinations you can mix-in ``AtLeastOnceDelivery``
 trait to your ``PersistentActor`` on the sending side.  It takes care of re-sending messages when they
 have not been confirmed within a configurable timeout.
+
+The state of the sending actor, including which messages that have been sent and still not been
+confirmed by the recepient, must be persistent so that it can survive a crash of the sending actor
+or JVM. The ``AtLeastOnceDelivery`` trait does not persist anything by itself. It is your 
+responsibility to persist the intent that a message is sent and that a confirmation has been
+received.
 
 .. note::
 
@@ -553,8 +599,15 @@ when the destination has replied with a confirmation message.
 Relationship between deliver and confirmDelivery
 ------------------------------------------------
 
-To send messages to the destination path, use the ``deliver`` method. If the persistent actor is not currently recovering, 
-this will send the message to the destination actor. When recovering, messages will be buffered until they have been confirmed using ``confirmDelivery``. 
+To send messages to the destination path, use the ``deliver`` method after you have persisted the intent
+to send the message. 
+
+The destination actor must send back a confirmation message. When the sending actor receives this
+confirmation message you should persist the fact that the message was delivered successfully and then call
+the ``confirmDelivery`` method.
+
+If the persistent actor is not currently recovering, the ``deliver`` method will send the message to 
+the destination actor. When recovering, messages will be buffered until they have been confirmed using ``confirmDelivery``. 
 Once recovery has completed, if there are outstanding messages that have not been confirmed (during the message replay), 
 the persistent actor will resend these before sending any other messages.
 
@@ -773,6 +826,9 @@ The journal plugin instance is an actor so the methods corresponding to requests
 are executed sequentially. It may delegate to asynchronous libraries, spawn futures, or delegate to other
 actors to achive parallelism. 
 
+The journal plugin class must have a constructor without parameters or constructor with one ``com.typesafe.config.Config``
+parameter. The plugin section of the actor system's config will be passed in the config constructor parameter.
+
 Don't run journal tasks/futures on the system default dispatcher, since that might starve other tasks.
 
 Snapshot store plugin API
@@ -793,15 +849,18 @@ The snapshot store instance is an actor so the methods corresponding to requests
 are executed sequentially. It may delegate to asynchronous libraries, spawn futures, or delegate to other
 actors to achive parallelism.
 
+The snapshot store plugin class must have a constructor without parameters or constructor with one ``com.typesafe.config.Config``
+parameter. The plugin section of the actor system's config will be passed in the config constructor parameter.
+
 Don't run snapshot store tasks/futures on the system default dispatcher, since that might starve other tasks.
 
 Plugin TCK
 ----------
 In order to help developers build correct and high quality storage plugins, we provide an Technology Compatibility Kit (`TCK <http://en.wikipedia.org/wiki/Technology_Compatibility_Kit>`_ for short).
 
-The TCK is usable from Java as well as Scala projects, for Scala you need to include the akka-persistence-tck-experimental dependency::
+The TCK is usable from Java as well as Scala projects, for Scala you need to include the akka-persistence-tck dependency::
 
-  "com.typesafe.akka" %% "akka-persistence-tck-experimental" % "@version@" % "test"
+  "com.typesafe.akka" %% "akka-persistence-tck" % "@version@" % "test"
 
 To include the Journal TCK tests in your test suite simply extend the provided ``JournalSpec``:
 
@@ -835,7 +894,16 @@ Local LevelDB journal
 ---------------------
 
 LevelDB journal plugin config entry is ``akka.persistence.journal.leveldb`` and it writes messages to a local LevelDB
-instance. The default location of the LevelDB files is a directory named ``journal`` in the current working
+instance. Enable this plugin by defining config property:
+
+.. includecode:: code/docs/persistence/PersistencePluginDocSpec.scala#leveldb-plugin-config
+
+LevelDB based plugins will also require the following additional dependency declaration::
+
+  "org.iq80.leveldb"            % "leveldb"          % "0.7"
+  "org.fusesource.leveldbjni"   % "leveldbjni-all"   % "1.8"
+
+The default location of the LevelDB files is a directory named ``journal`` in the current working
 directory. This location can be changed by configuration where the specified path can be relative or absolute:
 
 .. includecode:: code/docs/persistence/PersistencePluginDocSpec.scala#journal-config
@@ -885,10 +953,17 @@ Local snapshot store
 --------------------
 
 Local snapshot store plugin config entry is ``akka.persistence.snapshot-store.local`` and it writes snapshot files to
-the local filesystem. The default storage location is a directory named ``snapshots`` in the current working
+the local filesystem. Enable this plugin by defining config property:
+
+.. includecode:: code/docs/persistence/PersistencePluginDocSpec.scala#leveldb-snapshot-plugin-config 
+
+The default storage location is a directory named ``snapshots`` in the current working
 directory. This can be changed by configuration where the specified path can be relative or absolute:
 
 .. includecode:: code/docs/persistence/PersistencePluginDocSpec.scala#snapshot-config
+
+Note that it is not mandatory to specify a snapshot store plugin. If you don't use snapshots
+you don't have to configure it.
 
 .. _custom-serialization:
 

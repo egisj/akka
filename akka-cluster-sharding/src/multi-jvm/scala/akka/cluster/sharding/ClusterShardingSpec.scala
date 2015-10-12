@@ -3,6 +3,7 @@
  */
 package akka.cluster.sharding
 
+import akka.cluster.ddata.{ ReplicatorSettings, Replicator }
 import akka.cluster.sharding.ShardCoordinator.Internal.{ ShardStopped, HandOff }
 import akka.cluster.sharding.ShardRegion.Passivate
 import akka.cluster.sharding.ShardRegion.GetCurrentRegions
@@ -11,7 +12,6 @@ import language.postfixOps
 import scala.concurrent.duration._
 import com.typesafe.config.ConfigFactory
 import akka.actor._
-import akka.pattern.BackoffSupervisor
 import akka.cluster.Cluster
 import akka.persistence.PersistentActor
 import akka.persistence.Persistence
@@ -29,46 +29,7 @@ import akka.cluster.singleton.ClusterSingletonManager
 import akka.cluster.singleton.ClusterSingletonManagerSettings
 import akka.pattern.BackoffSupervisor
 
-object ClusterShardingSpec extends MultiNodeConfig {
-  val controller = role("controller")
-  val first = role("first")
-  val second = role("second")
-  val third = role("third")
-  val fourth = role("fourth")
-  val fifth = role("fifth")
-  val sixth = role("sixth")
-
-  commonConfig(ConfigFactory.parseString("""
-    akka.loglevel = INFO
-    akka.actor.provider = "akka.cluster.ClusterActorRefProvider"
-    akka.remote.log-remote-lifecycle-events = off
-    akka.cluster.auto-down-unreachable-after = 0s
-    akka.cluster.down-removal-margin = 5s
-    akka.cluster.roles = ["backend"]
-    akka.persistence.journal.plugin = "akka.persistence.journal.leveldb-shared"
-    akka.persistence.journal.leveldb-shared.store {
-      native = off
-      dir = "target/journal-ClusterShardingSpec"
-    }
-    akka.persistence.snapshot-store.plugin = "akka.persistence.snapshot-store.local"
-    akka.persistence.snapshot-store.local.dir = "target/snapshots-ClusterShardingSpec"
-    akka.cluster.sharding {
-      retry-interval = 1 s
-      handoff-timeout = 10 s
-      shard-start-timeout = 5s
-      entity-restart-backoff = 1s
-      rebalance-interval = 2 s
-      least-shard-allocation-strategy {
-        rebalance-threshold = 2
-        max-simultaneous-rebalance = 1
-      }
-    }
-    """))
-
-  nodeConfig(sixth) {
-    ConfigFactory.parseString("""akka.cluster.roles = ["frontend"]""")
-  }
-
+object ClusterShardingSpec {
   //#counter-actor
   case object Increment
   case object Decrement
@@ -134,6 +95,64 @@ object ClusterShardingSpec extends MultiNodeConfig {
 
   class AnotherCounter extends QualifiedCounter("AnotherCounter")
 
+  //#supervisor
+  class CounterSupervisor extends Actor {
+    val counter = context.actorOf(Props[Counter], "theCounter")
+
+    override val supervisorStrategy = OneForOneStrategy() {
+      case _: IllegalArgumentException     ⇒ SupervisorStrategy.Resume
+      case _: ActorInitializationException ⇒ SupervisorStrategy.Stop
+      case _: DeathPactException           ⇒ SupervisorStrategy.Stop
+      case _: Exception                    ⇒ SupervisorStrategy.Restart
+    }
+
+    def receive = {
+      case msg ⇒ counter forward msg
+    }
+  }
+  //#supervisor
+
+}
+
+abstract class ClusterShardingSpecConfig(val mode: String) extends MultiNodeConfig {
+  val controller = role("controller")
+  val first = role("first")
+  val second = role("second")
+  val third = role("third")
+  val fourth = role("fourth")
+  val fifth = role("fifth")
+  val sixth = role("sixth")
+
+  commonConfig(ConfigFactory.parseString(s"""
+    akka.loglevel = INFO
+    akka.actor.provider = "akka.cluster.ClusterActorRefProvider"
+    akka.remote.log-remote-lifecycle-events = off
+    akka.cluster.auto-down-unreachable-after = 0s
+    akka.cluster.roles = ["backend"]
+    akka.cluster.distributed-data.gossip-interval = 1s
+    akka.persistence.journal.plugin = "akka.persistence.journal.leveldb-shared"
+    akka.persistence.journal.leveldb-shared.store {
+      native = off
+      dir = "target/journal-ClusterShardingSpec"
+    }
+    akka.persistence.snapshot-store.plugin = "akka.persistence.snapshot-store.local"
+    akka.persistence.snapshot-store.local.dir = "target/snapshots-ClusterShardingSpec"
+    akka.cluster.sharding {
+      retry-interval = 1 s
+      handoff-timeout = 10 s
+      shard-start-timeout = 5s
+      entity-restart-backoff = 1s
+      rebalance-interval = 2 s
+      state-store-mode = "$mode"
+      least-shard-allocation-strategy {
+        rebalance-threshold = 2
+        max-simultaneous-rebalance = 1
+      }
+    }
+    """))
+  nodeConfig(sixth) {
+    ConfigFactory.parseString("""akka.cluster.roles = ["frontend"]""")
+  }
 }
 
 // only used in documentation
@@ -156,16 +175,31 @@ object ClusterShardingDocCode {
 
 }
 
-class ClusterShardingMultiJvmNode1 extends ClusterShardingSpec
-class ClusterShardingMultiJvmNode2 extends ClusterShardingSpec
-class ClusterShardingMultiJvmNode3 extends ClusterShardingSpec
-class ClusterShardingMultiJvmNode4 extends ClusterShardingSpec
-class ClusterShardingMultiJvmNode5 extends ClusterShardingSpec
-class ClusterShardingMultiJvmNode6 extends ClusterShardingSpec
-class ClusterShardingMultiJvmNode7 extends ClusterShardingSpec
+object PersistentClusterShardingSpecConfig extends ClusterShardingSpecConfig("persistence")
+object DDataClusterShardingSpecConfig extends ClusterShardingSpecConfig("ddata")
 
-class ClusterShardingSpec extends MultiNodeSpec(ClusterShardingSpec) with STMultiNodeSpec with ImplicitSender {
+class PersistentClusterShardingSpec extends ClusterShardingSpec(PersistentClusterShardingSpecConfig)
+class DDataClusterShardingSpec extends ClusterShardingSpec(DDataClusterShardingSpecConfig)
+
+class PersistentClusterShardingMultiJvmNode1 extends PersistentClusterShardingSpec
+class PersistentClusterShardingMultiJvmNode2 extends PersistentClusterShardingSpec
+class PersistentClusterShardingMultiJvmNode3 extends PersistentClusterShardingSpec
+class PersistentClusterShardingMultiJvmNode4 extends PersistentClusterShardingSpec
+class PersistentClusterShardingMultiJvmNode5 extends PersistentClusterShardingSpec
+class PersistentClusterShardingMultiJvmNode6 extends PersistentClusterShardingSpec
+class PersistentClusterShardingMultiJvmNode7 extends PersistentClusterShardingSpec
+
+class DDataClusterShardingMultiJvmNode1 extends DDataClusterShardingSpec
+class DDataClusterShardingMultiJvmNode2 extends DDataClusterShardingSpec
+class DDataClusterShardingMultiJvmNode3 extends DDataClusterShardingSpec
+class DDataClusterShardingMultiJvmNode4 extends DDataClusterShardingSpec
+class DDataClusterShardingMultiJvmNode5 extends DDataClusterShardingSpec
+class DDataClusterShardingMultiJvmNode6 extends DDataClusterShardingSpec
+class DDataClusterShardingMultiJvmNode7 extends DDataClusterShardingSpec
+
+abstract class ClusterShardingSpec(config: ClusterShardingSpecConfig) extends MultiNodeSpec(config) with STMultiNodeSpec with ImplicitSender {
   import ClusterShardingSpec._
+  import config._
 
   override def initialParticipants = roles.size
 
@@ -195,6 +229,9 @@ class ClusterShardingSpec extends MultiNodeSpec(ClusterShardingSpec) with STMult
   }
 
   def createCoordinator(): Unit = {
+    val replicator = system.actorOf(Replicator.props(
+      ReplicatorSettings(system).withGossipInterval(1.second).withMaxDeltaElements(10)), "replicator")
+
     def coordinatorProps(typeName: String, rebalanceEnabled: Boolean) = {
       val allocationStrategy = new ShardCoordinator.LeastShardAllocationStrategy(rebalanceThreshold = 2, maxSimultaneousRebalance = 1)
       val cfg = ConfigFactory.parseString(s"""
@@ -203,7 +240,10 @@ class ClusterShardingSpec extends MultiNodeSpec(ClusterShardingSpec) with STMult
       rebalance-interval = ${if (rebalanceEnabled) "2s" else "3600s"}
       """).withFallback(system.settings.config.getConfig("akka.cluster.sharding"))
       val settings = ClusterShardingSettings(cfg)
-      ShardCoordinator.props(typeName, settings, allocationStrategy)
+      if (settings.stateStoreMode == "persistence")
+        ShardCoordinator.props(typeName, settings, allocationStrategy)
+      else
+        ShardCoordinator.props(typeName, settings, allocationStrategy, replicator)
     }
 
     List("counter", "rebalancingCounter", "PersistentCounterEntities", "AnotherPersistentCounter",
@@ -252,7 +292,7 @@ class ClusterShardingSpec extends MultiNodeSpec(ClusterShardingSpec) with STMult
   lazy val rebalancingPersistentRegion = createRegion("RebalancingPersistentCounter", rememberEntities = true)
   lazy val autoMigrateRegion = createRegion("AutoMigrateRegionTest", rememberEntities = true)
 
-  "Cluster sharding" must {
+  s"Cluster sharding ($mode)" must {
 
     "setup shared journal" in {
       // start the Persistence extension
@@ -408,7 +448,6 @@ class ClusterShardingSpec extends MultiNodeSpec(ClusterShardingSpec) with STMult
 
     "use third and fourth node" in within(15 seconds) {
       join(third, first)
-      join(fourth, first)
 
       runOn(third) {
         for (_ ← 1 to 10)
@@ -418,6 +457,8 @@ class ClusterShardingSpec extends MultiNodeSpec(ClusterShardingSpec) with STMult
         lastSender.path should ===(region.path / "3" / "3") // local
       }
       enterBarrier("third-update")
+
+      join(fourth, first)
 
       runOn(fourth) {
         for (_ ← 1 to 20)
@@ -537,6 +578,15 @@ class ClusterShardingSpec extends MultiNodeSpec(ClusterShardingSpec) with STMult
         settings = ClusterShardingSettings(system),
         extractEntityId = extractEntityId,
         extractShardId = extractShardId)
+
+      //#counter-supervisor-start
+      ClusterSharding(system).start(
+        typeName = "SupervisedCounter",
+        entityProps = Props[CounterSupervisor],
+        settings = ClusterShardingSettings(system),
+        extractEntityId = extractEntityId,
+        extractShardId = extractShardId)
+      //#counter-supervisor-start
     }
     enterBarrier("extension-started")
     runOn(fifth) {

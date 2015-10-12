@@ -30,7 +30,6 @@ object RemoteNodeShutdownAndComesBackSpec extends MultiNodeConfig {
       akka.remote.transport-failure-detector.heartbeat-interval = 1 s
       akka.remote.transport-failure-detector.acceptable-heartbeat-pause = 3 s
       akka.remote.watch-failure-detector.acceptable-heartbeat-pause = 60 s
-      akka.remote.gate-invalid-addresses-for = 0.5 s
                               """)))
 
   testTransport(on = true)
@@ -118,9 +117,9 @@ abstract class RemoteNodeShutdownAndComesBackSpec
         watch(subjectNew)
 
         subjectNew ! "shutdown"
-        fishForMessage(5.seconds) {
-          case _: ActorIdentity       ⇒ false
-          case Terminated(subjectNew) ⇒ true
+        // we are waiting for a Terminated here, but it is ok if it does not arrive
+        receiveWhile(5.seconds) {
+          case _: ActorIdentity ⇒ true
         }
       }
 

@@ -15,6 +15,7 @@ import akka.actor.ActorSystem
 import akka.actor.ActorRef
 import akka.actor.ActorSelection
 import akka.actor.Address
+import akka.actor.DeadLetterSuppression
 import akka.actor.FSM
 import akka.actor.Props
 import akka.actor.Terminated
@@ -111,6 +112,11 @@ final class ClusterSingletonManagerSettings(
     new ClusterSingletonManagerSettings(singletonName, role, removalMargin, handOverRetryInterval)
 }
 
+/**
+ * Marker trait for remote messages with special serializer.
+ */
+sealed trait ClusterSingletonMessage extends Serializable
+
 object ClusterSingletonManager {
 
   /**
@@ -136,25 +142,25 @@ object ClusterSingletonManager {
   /**
    * INTERNAL API
    */
-  private object Internal {
+  private[akka] object Internal {
     /**
      * Sent from new oldest to previous oldest to initiate the
      * hand-over process. `HandOverInProgress` and `HandOverDone`
      * are expected replies.
      */
-    case object HandOverToMe
+    case object HandOverToMe extends ClusterSingletonMessage with DeadLetterSuppression
     /**
      * Confirmation by the previous oldest that the hand
      * over process, shut down of the singleton actor, has
      * started.
      */
-    case object HandOverInProgress
+    case object HandOverInProgress extends ClusterSingletonMessage
     /**
      * Confirmation by the previous oldest that the singleton
      * actor has been terminated and the hand-over process is
      * completed.
      */
-    case object HandOverDone
+    case object HandOverDone extends ClusterSingletonMessage
     /**
      * Sent from from previous oldest to new oldest to
      * initiate the normal hand-over process.
@@ -162,7 +168,7 @@ object ClusterSingletonManager {
      * oldest immediately, without knowing who was previous
      * oldest.
      */
-    case object TakeOverFromMe
+    case object TakeOverFromMe extends ClusterSingletonMessage with DeadLetterSuppression
 
     final case class HandOverRetry(count: Int)
     final case class TakeOverRetry(count: Int)
@@ -381,7 +387,13 @@ class ClusterSingletonManager(
 
   val (maxHandOverRetries, maxTakeOverRetries) = {
     val n = (removalMargin.toMillis / handOverRetryInterval.toMillis).toInt
-    (n + 3, math.max(1, n - 3))
+    val minRetries = context.system.settings.config.getInt(
+      "akka.cluster.singleton.min-number-of-hand-over-retries")
+    require(minRetries >= 1, "min-number-of-hand-over-retries must be >= 1")
+    val handOverRetries = math.max(minRetries, n + 3)
+    val takeOverRetries = math.max(1, handOverRetries - 3)
+
+    (handOverRetries, takeOverRetries)
   }
 
   // started when when self member is Up
@@ -550,8 +562,11 @@ class ClusterSingletonManager(
   }
 
   def scheduleDelayedMemberRemoved(m: Member): Unit = {
-    log.debug("Schedule DelayedMemberRemoved for [{}]", m.address)
-    context.system.scheduler.scheduleOnce(removalMargin, self, DelayedMemberRemoved(m))(context.dispatcher)
+    if (removalMargin > Duration.Zero) {
+      log.debug("Schedule DelayedMemberRemoved for [{}]", m.address)
+      context.system.scheduler.scheduleOnce(removalMargin, self, DelayedMemberRemoved(m))(context.dispatcher)
+    } else
+      self ! DelayedMemberRemoved(m)
   }
 
   def gotoOldest(): State = {

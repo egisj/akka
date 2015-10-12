@@ -9,7 +9,7 @@ val project = Project(
   settings = Project.defaultSettings ++ SbtMultiJvm.multiJvmSettings ++ Seq(
     name := "akka-sample-cluster-scala",
     version := "2.4-SNAPSHOT",
-    scalaVersion := "2.11.6",
+    scalaVersion := "2.11.7",
     scalacOptions in Compile ++= Seq("-encoding", "UTF-8", "-target:jvm-1.8", "-deprecation", "-feature", "-unchecked", "-Xlog-reflective-calls", "-Xlint"),
     javacOptions in Compile ++= Seq("-source", "1.8", "-target", "1.8", "-Xlint:unchecked", "-Xlint:deprecation"),
     libraryDependencies ++= Seq(
@@ -20,9 +20,9 @@ val project = Project(
       "com.typesafe.akka" %% "akka-cluster-tools" % akkaVersion,
       "com.typesafe.akka" %% "akka-multi-node-testkit" % akkaVersion,
       "org.scalatest" %% "scalatest" % "2.2.1" % "test",
-      "io.kamon" % "sigar-loader" % "1.6.5-rev001"),
+      "io.kamon" % "sigar-loader" % "1.6.6-rev002"),
     javaOptions in run ++= Seq(
-      "-Xms128m", "-Xmx1024m"),
+      "-Xms128m", "-Xmx1024m", "-Djava.library.path=./target/native"),
     Keys.fork in run := true,  
     mainClass in (Compile, run) := Some("sample.cluster.simple.SimpleClusterApp"),
     // make sure that MultiJvm test are compiled by the default test compilation

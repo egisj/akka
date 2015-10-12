@@ -124,7 +124,8 @@ trait AsyncWriteJournal extends Actor with WriteJournalBase with AsyncRecovery {
           replayFilterWindowSize, replayFilterMaxOldWriters))
         else persistentActor
 
-      breaker.withCircuitBreaker(asyncReadHighestSequenceNr(persistenceId, fromSequenceNr))
+      val readHighestSequenceNrFrom = math.max(0L, fromSequenceNr - 1)
+      breaker.withCircuitBreaker(asyncReadHighestSequenceNr(persistenceId, readHighestSequenceNrFrom))
         .flatMap { highSeqNr ⇒
           val toSeqNr = math.min(toSequenceNr, highSeqNr)
           if (highSeqNr == 0L || fromSequenceNr > toSeqNr)
@@ -145,7 +146,7 @@ trait AsyncWriteJournal extends Actor with WriteJournalBase with AsyncRecovery {
         }.recover {
           case e ⇒ ReplayMessagesFailure(e)
         }.pipeTo(replyTo).onSuccess {
-          case _ if publish ⇒ context.system.eventStream.publish(r)
+          case _ ⇒ if (publish) context.system.eventStream.publish(r)
         }
 
     case d @ DeleteMessagesTo(persistenceId, toSequenceNr, persistentActor) ⇒
@@ -154,7 +155,7 @@ trait AsyncWriteJournal extends Actor with WriteJournalBase with AsyncRecovery {
       } recover {
         case e ⇒ DeleteMessagesFailure(e, toSequenceNr)
       } pipeTo persistentActor onComplete {
-        case _ if publish ⇒ context.system.eventStream.publish(d)
+        case _ ⇒ if (publish) context.system.eventStream.publish(d)
       }
   }
 

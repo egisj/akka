@@ -537,6 +537,8 @@ different one. Outside of an actor and if no reply is needed the second
 argument can be ``null``; if a reply is needed outside of an actor you can use
 the ask-pattern described next..
 
+.. _actors-ask-lambda:
+
 Ask: Send-And-Receive-Future
 ----------------------------
 
@@ -657,6 +659,10 @@ Once set, the receive timeout stays in effect (i.e. continues firing repeatedly 
 periods). Pass in `Duration.Undefined` to switch off this feature.
 
 .. includecode:: code/docs/actorlambda/ActorDocTest.java#receive-timeout
+
+Messages marked with ``NotInfluenceReceiveTimeout`` will not reset the timer. This can be useful when
+``ReceiveTimeout`` should be fired by external inactivity but not influenced by internal activity,
+e.g. scheduled tick messages.
 
 .. _stopping-actors-lambda:
 
@@ -782,6 +788,7 @@ behavior is not the default).
 
 .. includecode:: code/docs/actorlambda/ActorDocTest.java#swapper
 
+.. _stash-lambda-java:
 
 Stash
 =====

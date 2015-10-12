@@ -28,7 +28,7 @@ supplied ``Props``. ``ClusterSingletonManager`` makes sure that at most one sing
 is running at any point in time.
 
 The singleton actor is always running on the oldest member with specified role.
-The oldest member is determined by [[akka.cluster.Member#isOlderThan]].
+The oldest member is determined by ``akka.cluster.Member#isOlderThan``.
 This can change when removing that member from the cluster. Be aware that there is a short time
 period when there is no active singleton during the hand-over process.
 
@@ -52,6 +52,9 @@ The size of the buffer is configurable and it can be disabled by using a buffer 
 It's worth noting that messages can always be lost because of the distributed nature of these actors.
 As always, additional logic should be implemented in the singleton (acknowledgement) and in the
 client (retry) actors to ensure at-least-once message delivery.
+
+The singleton instance will not run on members with status :ref:`WeaklyUp <weakly_up_java>` if that feature
+is enabled.
 
 Potential problems to be aware of
 ---------------------------------

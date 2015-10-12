@@ -22,6 +22,9 @@ the sender to know the location of the destination actor. This is achieved by se
 the messages via a ``ShardRegion`` actor provided by this extension, which knows how
 to route the message with the entity id to the final destination.
 
+Cluster sharding will not be active on members with status :ref:`WeaklyUp <weakly_up_java>` 
+if that feature is enabled.
+
 An Example
 ----------
 
@@ -33,7 +36,7 @@ The above actor uses event sourcing and the support provided in ``UntypedPersist
 It does not have to be a persistent actor, but in case of failure or migration of entities between nodes it must be able to recover
 its state if it is valuable.
 
-Note how the ``persistenceId`` is defined. The name of the actor is the entity entity identifier (utf-8 URL-encoded).
+Note how the ``persistenceId`` is defined. The name of the actor is the entity identifier (utf-8 URL-encoded).
 You may define it another way, but it must be unique.
 
 When using the sharding extension you are first, typically at system startup on each node
@@ -176,6 +179,26 @@ unused shards due to the round-trip to the coordinator. Rebalancing of shards ma
 also add latency. This should be considered when designing the application specific
 shard resolution, e.g. to avoid too fine grained shards.
 
+Distributed Data Mode
+---------------------
+
+Instead of using :ref:`persistence-java` it is possible to use the :ref:`distributed_data_java` module
+as storage for the state of the sharding coordinator. In such case the state of the 
+``ShardCoordinator`` will be replicated inside a cluster by the Distributed Data module with
+``WriteMajority``/``ReadMajority`` consistency.
+
+This mode can be enabled by setting configuration property ``akka.cluster.sharding.state-store-mode``
+as ``ddata``. 
+
+You must explicitly add the ``akka-distributed-data-experimental`` dependency to your build if
+you use this mode. It is possible to remove ``akka-persistence`` dependency from a project if it
+is not used in user code and ``remember-entities`` is ``off``.
+
+.. warning::
+
+  The ``ddata`` mode is considered as **“experimental”** as of its introduction in Akka 2.4.0, since
+  it depends on the experimental Distributed Data module.
+
 Proxy Only Mode
 ---------------
 
@@ -218,10 +241,25 @@ using a ``Passivate``.
 Note that the state of the entities themselves will not be restored unless they have been made persistent,
 e.g. with :ref:`persistence-java`.
 
+Supervision
+-----------
+
+If you need to use another ``supervisorStrategy`` for the entity actors than the default (restarting) strategy
+you need to create an intermediate parent actor that defines the ``supervisorStrategy`` to the
+child entity actor.
+
+.. includecode:: ../../../akka-cluster-sharding/src/test/java/akka/cluster/sharding/ClusterShardingTest.java#supervisor
+
+You start such a supervisor in the same way as if it was the entity actor.
+
+.. includecode:: ../../../akka-cluster-sharding/src/test/java/akka/cluster/sharding/ClusterShardingTest.java#counter-supervisor-start
+
+Note that stopped entities will be started again when a new message is targeted to the entity.
+
 Graceful Shutdown
 -----------------
 
-You can send the message ``ClusterSharding.GracefulShutdown`` message (``ClusterSharding.gracefulShutdownInstance
+You can send the message ``ClusterSharding.GracefulShutdown`` message (``ClusterSharding.gracefulShutdownInstance``
 in Java) to the ``ShardRegion`` actor to handoff all shards that are hosted by that ``ShardRegion`` and then the
 ``ShardRegion`` actor will be stopped. You can ``watch`` the ``ShardRegion`` actor to know when it is completed.
 During this period other regions will buffer messages for those shards in the same way as when a rebalance is
@@ -232,6 +270,46 @@ When the ``ShardRegion`` has terminated you probably want to ``leave`` the clust
 This is how to do that: 
 
 .. includecode:: ../../../akka-cluster-sharding/src/test/java/akka/cluster/sharding/ClusterShardingTest.java#graceful-shutdown
+
+.. _RemoveInternalClusterShardingData-java:
+
+Removal of Internal Cluster Sharding Data
+-----------------------------------------
+
+The Cluster Sharding coordinator stores the locations of the shards using Akka Persistence.
+This data can safely be removed when restarting the whole Akka Cluster.
+Note that this is not application data.
+
+There is a utility program ``akka.cluster.sharding.RemoveInternalClusterShardingData``
+that removes this data.
+ 
+.. warning::
+
+  Never use this program while there are running Akka Cluster nodes that are
+  using Cluster Sharding. Stop all Cluster nodes before using this program.
+
+It can be needed to remove the data if the Cluster Sharding coordinator
+cannot startup because of corrupt data, which may happen if accidentally
+two clusters were running at the same time, e.g. caused by using auto-down
+and there was a network partition.
+
+Use this program as a standalone Java main program::
+ 
+    java -classpath <jar files, including akka-cluster-sharding>
+      akka.cluster.sharding.RemoveInternalClusterShardingData
+        -2.3 entityType1 entityType2 entityType3
+
+The program is included in the ``akka-cluster-sharding`` jar file. It
+is easiest to run it with same classpath and configuration as your ordinary
+application. It can be run from sbt or maven in similar way.
+
+Specify the entity type names (same as you use in the ``start`` method
+of ``ClusterSharding``) as program arguments.
+
+If you specify ``-2.3`` as the first program argument it will also try
+to remove data that was stored by Cluster Sharding in Akka 2.3.x using
+different persistenceId.
+
 
 Dependencies
 ------------
